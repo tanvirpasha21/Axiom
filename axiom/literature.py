@@ -49,7 +49,7 @@ from .models import (
     ConflictPair,
     WhiteSpace,
 )
-from .api_clients import SemanticScholarClient, ArxivClient
+from .api_clients import ArxivClient, LLMPaperClient, LocalPaperStore
 from .llm_backends import get_backend, LLMBackend
 
 console = Console()
@@ -97,7 +97,6 @@ class LiteratureAgent:
         backend: LLM backend to use. "anthropic" (default), "ollama", or "openai".
         api_key: API key for the backend (ANTHROPIC_API_KEY or OPENAI_API_KEY env var).
         model: Model name. E.g. "claude-opus-4-5", "llama2", "mistral", "gpt-4".
-        ss_api_key: Semantic Scholar API key (optional, for higher rate limits).
         base_url: Base URL for OpenAI-compatible APIs (e.g., local llama.cpp server).
         verbose: Show rich progress output. Default True.
         max_papers: Max papers to fetch per search. Default 20.
@@ -108,21 +107,68 @@ class LiteratureAgent:
         backend: str = "anthropic",
         api_key: str | None = None,
         model: str | None = None,
-        ss_api_key: str | None = None,
         base_url: str | None = None,
         verbose: bool = True,
         max_papers: int = 20,
+        paper_source: str = "llm+arxiv",
+        db_path: str = "axiom_papers.jsonl",
     ):
+        """
+        Args:
+            paper_source: Where to retrieve papers from.
+                "llm"              — LLM's own training knowledge. No internet, no keys.
+                                     Works fully offline with Ollama.
+                "arxiv"            — Live ArXiv preprints. Free, no key.
+                "local"            — Your trained LocalPaperStore only.
+                "llm+arxiv"        — LLM knowledge + ArXiv. Default. Best zero-key option.
+                "local+llm"        — Local store + LLM knowledge.
+                "local+arxiv"      — Local store + live ArXiv.
+                "local+llm+arxiv"  — All three combined. Maximum coverage.
+            db_path: Path to the JSONL file used by LocalPaperStore.
+                     Train the store with store.add_many(...) or store.import_from_file(...).
+        """
         self._llm = get_backend(
             backend_type=backend,
             api_key=api_key,
             model=model,
             base_url=base_url,
         )
-        self._ss = SemanticScholarClient(api_key=ss_api_key)
         self._arxiv = ArxivClient()
+        self._llm_papers = LLMPaperClient(self._llm)
+        self._store = LocalPaperStore(db_path)
+        self._paper_source = paper_source
         self.verbose = verbose
         self.max_papers = max_papers
+
+    @property
+    def store(self) -> LocalPaperStore:
+        """The local paper store. Add papers here to train the agent."""
+        return self._store
+
+    def _get_papers(self, query: str, limit: int, year_range: str | None = None) -> list[Paper]:
+        """Merge results from all configured sources, deduplicating by title."""
+        papers: list[Paper] = []
+        seen: set[str] = set()
+
+        def _add(new_papers: list[Paper]):
+            for p in new_papers:
+                key = p.title.lower()
+                if key not in seen:
+                    seen.add(key)
+                    papers.append(p)
+
+        src = self._paper_source
+
+        if "local" in src:
+            _add(self._store.search(query, limit=limit, year_range=year_range))
+
+        if "llm" in src:
+            _add(self._llm_papers.search(query, limit=limit, year_range=year_range))
+
+        if "arxiv" in src:
+            _add(self._arxiv.search(query, limit=min(limit, 10)))
+
+        return papers
 
     def search(
         self,
@@ -144,21 +190,20 @@ class LiteratureAgent:
             SearchResult with papers, summary, conflicts, and white spaces.
         """
         n = limit or self.max_papers
-
         with self._progress(f"Searching literature for: [bold]{query}[/bold]") as progress:
-            task = progress.add_task("Querying Semantic Scholar...", total=None)
+            task = progress.add_task(f"Retrieving papers [{self._paper_source}]...", total=None)
 
-            papers = self._ss.search(query, limit=n, year_range=year_range)
+            papers = self._get_papers(query, limit=n, year_range=year_range)
 
-            if include_arxiv:
+            # include_arxiv adds live ArXiv results on top if not already in source
+            if include_arxiv and "arxiv" not in self._paper_source:
                 progress.update(task, description="Querying ArXiv preprints...")
-                arxiv_papers = self._arxiv.search(query, limit=min(n // 2, 10))
                 existing_titles = {p.title.lower() for p in papers}
-                for ap in arxiv_papers:
+                for ap in self._arxiv.search(query, limit=min(n // 2, 10)):
                     if ap.title.lower() not in existing_titles:
                         papers.append(ap)
 
-            progress.update(task, description=f"Synthesising {len(papers)} papers with Claude...")
+            progress.update(task, description=f"Synthesising {len(papers)} papers...")
             result = self._synthesise(query, papers)
 
         if self.verbose:
@@ -178,7 +223,7 @@ class LiteratureAgent:
         """
         with self._progress(f"Running conflict radar on: [bold]{query}[/bold]") as progress:
             progress.add_task("Fetching papers...", total=None)
-            papers = self._ss.search(query, limit=self.max_papers)
+            papers = self._get_papers(query, limit=self.max_papers)
 
         report = self._detect_conflicts(query, papers)
 
@@ -199,7 +244,7 @@ class LiteratureAgent:
         """
         with self._progress(f"Scanning for white spaces in: [bold]{query}[/bold]") as progress:
             progress.add_task("Fetching papers...", total=None)
-            papers = self._ss.search(query, limit=self.max_papers)
+            papers = self._get_papers(query, limit=self.max_papers)
 
         report = self._find_gaps(query, papers)
 
@@ -220,7 +265,7 @@ class LiteratureAgent:
         """
         with self._progress(f"Analysing field: [bold]{field}[/bold]") as progress:
             progress.add_task("Fetching representative papers...", total=None)
-            papers = self._ss.search(field, limit=self.max_papers)
+            papers = self._get_papers(field, limit=self.max_papers)
 
         summary = self._summarise_field(field, papers)
 
@@ -521,8 +566,8 @@ Return JSON:
 
     def close(self):
         self._llm.close()
-        self._ss.close()
         self._arxiv.close()
+        self._llm_papers.close()
 
     def __enter__(self):
         return self

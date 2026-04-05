@@ -2,8 +2,9 @@
 from axiom import LiteratureAgent
 
 agent = LiteratureAgent(
-    backend="openrouter",
-    api_key="YOUR_OPENROUTER_API_KEY",  # set OPENROUTER_API_KEY env var instead
-    model="openai/gpt-4o"
+    backend="ollama", model="mistral",
+    paper_source="local+llm",       # your store + LLM knowledge
+    db_path="axiom_papers.jsonl",   # your training file
 )
-results = agent.search("fraud detection transformer models")
+results = agent.search("fraud detection")
+print(results)

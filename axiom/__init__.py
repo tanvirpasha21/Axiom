@@ -10,6 +10,7 @@ Quick start:
 """
 
 from axiom.literature import LiteratureAgent
+from axiom.api_clients import LocalPaperStore
 from axiom.models import (
     Paper,
     SearchResult,
@@ -24,6 +25,7 @@ __email__ = "contact@voidstudio.tech"
 
 __all__ = [
     "LiteratureAgent",
+    "LocalPaperStore",
     "Paper",
     "SearchResult",
     "ConflictReport",
