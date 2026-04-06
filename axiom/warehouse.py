@@ -359,12 +359,13 @@ class PaperWarehouse:
     def _search_qdrant(self, query: str, limit: int) -> list[Paper]:
         vector = self._model.encode(query).tolist()
         try:
-            hits = self._qdrant.search(
+            result = self._qdrant.query_points(
                 collection_name=self._collection,
-                query_vector=vector,
+                query=vector,
                 limit=limit,
                 with_payload=True,
             )
+            hits = result.points
         except Exception as e:
             logger.error(f"Qdrant search failed: {e}")
             return self._search_jsonl(query, limit)
@@ -561,7 +562,8 @@ class PaperWarehouse:
         logger.info(f"Reindex: re-embedding {len(papers)} papers …")
         # Clear collection
         from qdrant_client.models import VectorParams, Distance
-        self._qdrant.recreate_collection(
+        self._qdrant.delete_collection(collection_name=self._collection)
+        self._qdrant.create_collection(
             collection_name=self._collection,
             vectors_config=VectorParams(size=EMBED_DIM, distance=Distance.COSINE),
         )
