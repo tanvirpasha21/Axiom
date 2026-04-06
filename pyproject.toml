@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "axiom"
-version = "0.1.0"
+version = "0.2.0"
 description = "AXIOM — Agentic literature intelligence for researchers. Search, synthesise, detect conflicts, and surface white spaces across academic fields."
 readme = "README.md"
 license = {text = "MIT"}
@@ -39,10 +39,21 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-ollama = ["ollama>=0.1.0"]
-openai = ["openai>=1.0.0"]
-openrouter = ["openai>=1.0.0"]
-all = ["ollama>=0.1.0", "openai>=1.0.0"]
+ollama      = ["ollama>=0.1.0"]
+openai      = ["openai>=1.0.0"]
+openrouter  = ["openai>=1.0.0"]
+warehouse   = [
+    "qdrant-client>=1.9.0",
+    "sentence-transformers>=2.7.0",
+    "redis>=5.0.0",
+]
+all = [
+    "ollama>=0.1.0",
+    "openai>=1.0.0",
+    "qdrant-client>=1.9.0",
+    "sentence-transformers>=2.7.0",
+    "redis>=5.0.0",
+]
 dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",

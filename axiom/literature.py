@@ -112,20 +112,24 @@ class LiteratureAgent:
         max_papers: int = 20,
         paper_source: str = "llm+arxiv",
         db_path: str = "axiom_papers.jsonl",
+        warehouse=None,
     ):
         """
         Args:
             paper_source: Where to retrieve papers from.
                 "llm"              — LLM's own training knowledge. No internet, no keys.
-                                     Works fully offline with Ollama.
                 "arxiv"            — Live ArXiv preprints. Free, no key.
-                "local"            — Your trained LocalPaperStore only.
+                "local"            — JSONL LocalPaperStore only.
+                "warehouse"        — Qdrant vector warehouse (semantic search).
+                                     Requires PaperWarehouse().connect() passed via warehouse=.
                 "llm+arxiv"        — LLM knowledge + ArXiv. Default. Best zero-key option.
                 "local+llm"        — Local store + LLM knowledge.
                 "local+arxiv"      — Local store + live ArXiv.
-                "local+llm+arxiv"  — All three combined. Maximum coverage.
-            db_path: Path to the JSONL file used by LocalPaperStore.
-                     Train the store with store.add_many(...) or store.import_from_file(...).
+                "local+llm+arxiv"  — All three combined.
+                "warehouse+llm"    — Warehouse semantic search + LLM knowledge.
+            db_path:   Path to the JSONL file for LocalPaperStore.
+            warehouse: Connected PaperWarehouse instance (required when
+                       paper_source contains "warehouse").
         """
         self._llm = get_backend(
             backend_type=backend,
@@ -136,13 +140,14 @@ class LiteratureAgent:
         self._arxiv = ArxivClient()
         self._llm_papers = LLMPaperClient(self._llm)
         self._store = LocalPaperStore(db_path)
+        self._warehouse = warehouse
         self._paper_source = paper_source
         self.verbose = verbose
         self.max_papers = max_papers
 
     @property
     def store(self) -> LocalPaperStore:
-        """The local paper store. Add papers here to train the agent."""
+        """The local JSONL paper store."""
         return self._store
 
     def _get_papers(self, query: str, limit: int, year_range: str | None = None) -> list[Paper]:
@@ -158,6 +163,14 @@ class LiteratureAgent:
                     papers.append(p)
 
         src = self._paper_source
+
+        if "warehouse" in src:
+            if self._warehouse is None:
+                raise ValueError(
+                    "paper_source contains 'warehouse' but no warehouse was passed.\n"
+                    "Pass warehouse=PaperWarehouse().connect() to LiteratureAgent()."
+                )
+            _add(self._warehouse.search(query, limit=limit, year_range=year_range))
 
         if "local" in src:
             _add(self._store.search(query, limit=limit, year_range=year_range))
@@ -568,6 +581,8 @@ Return JSON:
         self._llm.close()
         self._arxiv.close()
         self._llm_papers.close()
+        if self._warehouse:
+            self._warehouse.close()
 
     def __enter__(self):
         return self

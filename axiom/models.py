@@ -9,21 +9,31 @@ from pydantic import BaseModel, Field
 
 
 class Paper(BaseModel):
-    """A single academic paper with metadata and agent-computed signals."""
+    """A single academic paper with full metadata and agent-computed signals."""
 
+    # Core identity
     title: str
     authors: list[str] = Field(default_factory=list)
     year: Optional[int] = None
     venue: Optional[str] = None
     abstract: Optional[str] = None
     url: Optional[str] = None
+    doi: Optional[str] = None                       # e.g. "10.1109/TPAMI.2021.123456"
+    source_id: Optional[str] = None                 # arXiv ID, IEEE article number, etc.
+
+    # Provenance
+    source: str = "unknown"                         # "arxiv" | "ieee" | "llm_knowledge" | "manual"
     citation_count: Optional[int] = None
+
+    # Quality
+    quality_rank: Optional[str] = None              # "Q1" | "Q2" | "Q3" | "Q4" | "top_conference"
+
+    # Agent-computed signals (populated after LLM synthesis)
     relevance_score: float = Field(default=0.0, ge=0.0, le=1.0)
     tags: list[str] = Field(default_factory=list)
     conflict_flag: bool = False
     supports_hypothesis: bool = False
     is_negative_result: bool = False
-    source: str = "semantic_scholar"
 
     def __str__(self) -> str:
         authors_str = ", ".join(self.authors[:2])
@@ -31,7 +41,8 @@ class Paper(BaseModel):
             authors_str += " et al."
         year_str = f" ({self.year})" if self.year else ""
         venue_str = f" · {self.venue}" if self.venue else ""
-        return f"{self.title} — {authors_str}{year_str}{venue_str}"
+        rank_str = f" [{self.quality_rank}]" if self.quality_rank else ""
+        return f"{self.title} — {authors_str}{year_str}{venue_str}{rank_str}"
 
 
 class ConflictPair(BaseModel):
@@ -75,6 +86,9 @@ class SearchResult(BaseModel):
     def conflicting_papers(self) -> list[Paper]:
         return [p for p in self.papers if p.conflict_flag]
 
+    def q1_q2_papers(self) -> list[Paper]:
+        return [p for p in self.papers if p.quality_rank in ("Q1", "Q2", "top_conference")]
+
 
 class ConflictReport(BaseModel):
     """Standalone conflict analysis for a research area."""
@@ -104,3 +118,26 @@ class FieldSummary(BaseModel):
     key_venues: list[str] = Field(default_factory=list)
     open_problems: list[str] = Field(default_factory=list)
     summary: str = ""
+
+
+class IngestResult(BaseModel):
+    """Result of a single ingestion run."""
+
+    source: str
+    query: str
+    fetched: int = 0
+    after_normalise: int = 0
+    after_deduplicate: int = 0
+    after_quality_filter: int = 0
+    stored: int = 0
+    errors: list[str] = Field(default_factory=list)
+
+    def __str__(self) -> str:
+        return (
+            f"[{self.source}] fetched={self.fetched} "
+            f"normalised={self.after_normalise} "
+            f"deduped={self.after_deduplicate} "
+            f"quality={self.after_quality_filter} "
+            f"stored={self.stored}"
+            + (f" errors={len(self.errors)}" if self.errors else "")
+        )

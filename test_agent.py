@@ -107,7 +107,7 @@ if section("1. Pydantic models (offline)", "models"):
         assert_eq(p.relevance_score, 0.0)
         assert_eq(p.conflict_flag, False)
         assert_eq(p.is_negative_result, False)
-        assert_eq(p.source, "semantic_scholar")
+        assert_eq(p.source, "unknown")
 
     def t_paper_str_two():
         s = str(Paper(title="My Paper", authors=["Alice", "Bob"], year=2023, venue="NeurIPS"))
